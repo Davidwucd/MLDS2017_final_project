@@ -1,3 +1,15 @@
+'''Trains a LSTM on the IMDB sentiment classification task.
+The dataset is actually too small for LSTM to be of any advantage
+compared to simpler, much faster methods such as TF-IDF + LogReg.
+Notes:
+
+- RNNs are tricky. Choice of batch size is important,
+choice of loss and optimizer is critical, etc.
+Some configurations won't converge.
+
+- LSTM loss decrease patterns during training can be quite different
+from what you see with CNNs/MLPs/etc.
+'''
 from __future__ import print_function
 import numpy as np
 import glob
@@ -5,12 +17,13 @@ np.random.seed(42)  # for reproducibility
 
 from keras.preprocessing import sequence
 from keras.utils import np_utils
-from keras.models import Sequential
+from keras.models import Sequential, load_model
 from keras.layers import Dense, Dropout, Activation, Embedding
 from keras.layers import LSTM, SimpleRNN, GRU
+from keras.optimizers import SGD
 from keras.datasets import imdb
 from keras.utils import plot_model
-from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 
 max_features = 20000
 maxlen = 80  # cut texts after this number of words (among top max_features most common words)
@@ -40,26 +53,35 @@ print('X_test shape:', X_test.shape)
 print('Build model...')
 model = Sequential()
 model.add(Embedding(max_features, 128, dropout=0.2))
-model.add(LSTM(128, dropout_W=0.2, dropout_U=0.2))  # try using a GRU instead, for fun
+model.add(LSTM(128, dropout=0.2, recurrent_dropout=0.2))  # try using a GRU instead, for fun
 model.add(Dense(1))
 model.add(Activation('sigmoid'))
 
+optimizer = SGD(lr=0.02, momentum=0.2, decay=0.0, nesterov=False)
+
 # try using different optimizers and different optimizer configs
 model.compile(loss='binary_crossentropy',
-              optimizer='Adam',
+              optimizer=optimizer,
               metrics=['accuracy'])
 print(model.summary())
 plot_model(model, to_file='model_lstm.png')
 
 model_fname = 'model_lstm.hdf5'
-early_stopping = EarlyStopping(monitor='val_loss', min_delta=0.01, patience=5, verbose=0, mode='auto')
+early_stopping = EarlyStopping(monitor='val_loss', min_delta=0.01, patience=10, verbose=0, mode='auto')
 model_checkpoint = ModelCheckpoint(model_fname, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, mode='auto', period=1)
-callbacks=[early_stopping, model_checkpoint]
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', verbose=1, factor=0.5, patience=5, cooldown=3, min_lr=1e-8)
+callbacks=[early_stopping, model_checkpoint, reduce_lr]
 
 print('Train...')
 model.fit(X_train, y_train, batch_size=batch_size, epochs=100,
           validation_data=(X_validation, y_validation), callbacks=callbacks)
+
+model.load_weights(model_fname)
+
 score, acc = model.evaluate(X_test, y_test,
                             batch_size=batch_size)
+
+
+
 print('Test score:', score)
 print('Test accuracy:', acc)
